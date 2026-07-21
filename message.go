@@ -47,6 +47,11 @@ func (cli *Client) handleEncryptedMessage(ctx context.Context, node *waBinary.No
 		cli.sendAck(ctx, node, NackParsingError)
 		return
 	}
+	if cli.PreDecryptIgnore != nil && cli.PreDecryptIgnore(info) {
+		cli.Log.Debugf("Ignoring message %s from %s in %s (PreDecryptIgnore)", info.ID, info.Sender, info.Chat)
+		cli.sendAck(ctx, node, 0)
+		return
+	}
 	if !info.SenderAlt.IsEmpty() {
 		cli.StoreLIDPNMapping(ctx, info.SenderAlt, info.Sender)
 	} else if !info.RecipientAlt.IsEmpty() {

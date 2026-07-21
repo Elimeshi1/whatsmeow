@@ -160,6 +160,12 @@ type Client struct {
 	// PreRetryCallback is called before a retry receipt is accepted.
 	// If it returns false, the accepting will be cancelled and the retry receipt will be ignored.
 	PreRetryCallback func(receipt *events.Receipt, id types.MessageID, retryCount int, msg *waE2E.Message) bool
+	// PreDecryptIgnore is called for every incoming encrypted message right after the stanza is
+	// parsed, before any decryption or store writes (LID/PN mappings, push names, identity and
+	// session updates). If it returns true, the message is acked so the server does not re-deliver
+	// it, and then dropped entirely. This lets applications that ignore whole chat types (e.g.
+	// incoming status@broadcast) skip the decryption work instead of discarding the event later.
+	PreDecryptIgnore func(info *types.MessageInfo) bool
 	// Should whatsmeow store recently sent messages in the database so that retry receipts can be accepted
 	// even if the process is restarted? If false, only the in-memory cache and GetMessageForRetry will be used.
 	UseRetryMessageStore bool
