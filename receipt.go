@@ -45,7 +45,19 @@ func (cli *Client) handleReceipt(ctx context.Context, node *waBinary.Node) {
 
 func (cli *Client) handleGroupedReceipt(partialReceipt events.Receipt, participants *waBinary.Node) (cancelled bool) {
 	pag := participants.AttrGetter()
-	partialReceipt.MessageIDs = []types.MessageID{pag.String("key")}
+	// The server names this attribute message_id. It used to be key, and some
+	// receipts still arrive that way, so both are accepted. Reading only key
+	// left the receipt with an empty message id, which silently dropped every
+	// grouped delivery receipt on statuses and groups.
+	messageID := pag.OptionalString("message_id")
+	if messageID == "" {
+		messageID = pag.OptionalString("key")
+	}
+	if messageID == "" {
+		cli.Log.Warnf("Grouped receipt in %s has no message id: %s", partialReceipt.Chat, participants)
+		return
+	}
+	partialReceipt.MessageIDs = []types.MessageID{messageID}
 	for _, child := range participants.GetChildren() {
 		if child.Tag != "user" {
 			cli.Log.Warnf("Unexpected node in grouped receipt participants: %s", &child)
@@ -55,6 +67,11 @@ func (cli *Client) handleGroupedReceipt(partialReceipt events.Receipt, participa
 		receipt := partialReceipt
 		receipt.Timestamp = ag.UnixTime("t")
 		receipt.MessageSource.Sender = ag.JID("jid")
+		// A grouped receipt carries no type of its own; each participant states
+		// its own. Without this a read arrives looking like a delivery.
+		if userType := ag.OptionalString("type"); userType != "" {
+			receipt.Type = normalizeReceiptType(userType)
+		}
 		if !ag.OK() {
 			cli.Log.Warnf("Failed to parse user node %s in grouped receipt: %v", &child, ag.Error())
 			continue
@@ -62,6 +79,16 @@ func (cli *Client) handleGroupedReceipt(partialReceipt events.Receipt, participa
 		cancelled = cli.dispatchEvent(&receipt) || cancelled
 	}
 	return
+}
+
+// normalizeReceiptType maps the per-participant type of a grouped receipt onto
+// the receipt types used everywhere else. The server spells a delivery out here
+// while writing it as an absent attribute on a plain receipt.
+func normalizeReceiptType(value string) types.ReceiptType {
+	if value == "delivery" {
+		return types.ReceiptTypeDelivered
+	}
+	return types.ReceiptType(value)
 }
 
 func (cli *Client) parseReceipt(node *waBinary.Node) (*events.Receipt, []waBinary.Node, error) {
